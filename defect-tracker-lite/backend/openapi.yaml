@@ -1,0 +1,58 @@
+openapi: 3.0.3
+info:
+  title: Defect Tracker Lite API
+  version: 1.1.0
+servers:
+  - url: http://localhost:5000
+paths:
+  /api/health:
+    get: { summary: Ping, responses: { '200': { description: OK } } }
+  /api/auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { email: {type: string}, password: {type: string} }, required: [email, password] } } }
+      responses: { '200': { description: OK } }
+  /api/projects:
+    get:
+      summary: List projects
+      responses: { '200': { description: OK } }
+    post:
+      summary: Create project (manager only)
+      responses: { '201': { description: Created }, '403': { description: Forbidden } }
+  /api/defects:
+    get:
+      summary: List defects (filters)
+      parameters:
+        - in: query; name: project_id; schema: { type: integer }
+        - in: query; name: status; schema: { type: string }
+        - in: query; name: priority; schema: { type: string }
+        - in: query; name: q; schema: { type: string }
+        - in: query; name: date_from; schema: { type: string, format: date }
+        - in: query; name: date_to; schema: { type: string, format: date }
+      responses: { '200': { description: OK } }
+    post:
+      summary: Create defect
+      responses: { '201': { description: Created } }
+  /api/defects/{id}:
+    patch:
+      summary: Update defect
+      parameters:
+        - in: path; name: id; schema: { type: integer }; required: true
+      responses: { '200': { description: OK } }
+  /api/upload:
+    post:
+      summary: Upload attachment (png/jpg/webp/pdf)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { file: { type: string, format: binary } } }
+      responses: { '201': { description: Created } }
+  /api/reports/summary:
+    get:
+      summary: Summary (by status/priority)
+      parameters:
+        - in: query; name: project_id; schema: { type: integer }
+      responses: { '200': { description: OK } }
