@@ -59,4 +59,41 @@ jobs:
         if: always()
         working-directory: backend
         run: |
-          kill $(
+          kill $(cat server.pid) 2>/dev/null || true
+
+  frontend-smoke:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install deps
+        working-directory: frontend
+        run: npm ci || npm i
+
+      # Запускаем dev-server, ждём 200 с корня и гасим
+      - name: Start dev server and ping /
+        working-directory: frontend
+        env:
+          BROWSER: none
+          CI: "true"
+        run: |
+          npm start & echo $! > web.pid
+          for i in {1..60}; do
+            sleep 2
+            if curl -fsS http://127.0.0.1:3000 >/dev/null; then
+              echo "Frontend started"; break
+            fi
+            if [ "$i" -eq 60 ]; then echo "::error ::Frontend did not start"; exit 1; fi
+          done
+
+      - name: Stop dev server
+        if: always()
+        working-directory: frontend
+        run: |
+          kill $(cat web.pid) 2>/dev/null || true
