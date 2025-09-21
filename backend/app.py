@@ -2,6 +2,7 @@ import os, time, logging
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta, timezone, date as date_cls
+from collections import Counter
 
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -20,7 +21,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
 app = Flask(__name__)
-# дозволяем переопределять URI через переменные окружения (удобно для CI/тестов)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///' + DB_PATH)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB attachments
@@ -172,13 +172,14 @@ def defects():
         title = (data.get('title') or '').strip()
         description = (data.get('description') or '').strip()
         priority = (data.get('priority') or 'medium').strip()
+        status = (data.get('status') or 'new').strip()          # <-- учитываем статус из тела
         attachment_url = (data.get('attachment_url') or '').strip() or None
         if not project_id or not title:
             return jsonify({'error': 'project_id_and_title_required'}), 400
-        if not Project.query.get(project_id):
+        if not db.session.get(Project, project_id):             # <-- без LegacyAPIWarning
             return jsonify({'error': 'project_not_found'}), 404
         d = Defect(project_id=project_id, title=title, description=description,
-                   priority=priority, attachment_url=attachment_url)
+                   priority=priority, status=status, attachment_url=attachment_url)
         db.session.add(d); db.session.commit()
         return jsonify({'id': d.id}), 201
 
@@ -227,7 +228,7 @@ def defects():
 @app.route('/api/defects/<int:defect_id>', methods=['PATCH'])
 @auth_required()
 def update_defect(defect_id):
-    d = Defect.query.get(defect_id)
+    d = db.session.get(Defect, defect_id)  # <-- без LegacyAPIWarning
     if not d: return jsonify({'error': 'not_found'}), 404
     data = request.get_json() or {}
     for f in ['title','description','priority','status','assignee_id','attachment_url']:
@@ -247,6 +248,7 @@ def upload():
     ext = file.filename.rsplit('.',1)[-1].lower()
     if ext not in ALLOWED_EXT:
         return jsonify({'error': 'bad_ext', 'allowed': sorted(list(ALLOWED_EXT))}), 400
+    from werkzeug.utils import secure_filename
     fname = f"{int(time.time())}_{secure_filename(file.filename)}"
     path = os.path.join(UPLOAD_DIR, fname)
     file.save(path)
@@ -257,6 +259,49 @@ def upload():
 @app.route('/uploads/<path:filename>')
 def uploads(filename):
     return send_from_directory(UPLOAD_DIR, filename)
+
+# ---- Reports
+@app.route('/api/reports/summary', methods=['GET'])
+@auth_required()
+def reports_summary():
+    """Сводка: total, by_status, by_priority. Поддерживает те же фильтры, что /api/defects (минимально)."""
+    q = (request.args.get('q') or '').strip().lower()
+    project_id = request.args.get('project_id', type=int)
+    status = (request.args.get('status') or '').strip()
+    priority = (request.args.get('priority') or '').strip()
+    date_from = request.args.get('date_from', type=str)
+    date_to = request.args.get('date_to', type=str)
+
+    query = Defect.query
+    if project_id: query = query.filter(Defect.project_id == project_id)
+    if status:     query = query.filter(Defect.status == status)
+    if priority:   query = query.filter(Defect.priority == priority)
+    if q:
+        like = f'%{q}%'
+        query = query.filter((Defect.title.ilike(like)) | (Defect.description.ilike(like)))
+    if date_from:
+        try:
+            dfrom = _parse_date(date_from)
+            query = query.filter(Defect.created_at >= datetime(dfrom.year, dfrom.month, dfrom.day))
+        except ValueError:
+            return jsonify({'error': 'bad_date_from', 'need': 'YYYY-MM-DD'}), 400
+    if date_to:
+        try:
+            dto = _parse_date(date_to) + timedelta(days=1)
+            query = query.filter(Defect.created_at < datetime(dto.year, dto.month, dto.day))
+        except ValueError:
+            return jsonify({'error': 'bad_date_to', 'need': 'YYYY-MM-DD'}), 400
+
+    items = query.all()
+    total = len(items)
+    by_status = Counter([(d.status or 'new') for d in items])
+    by_priority = Counter([(d.priority or 'medium') for d in items])
+
+    return jsonify({
+        'total': total,
+        'by_status': [{'status': k, 'count': v} for k, v in by_status.items()],
+        'by_priority': [{'priority': k, 'count': v} for k, v in by_priority.items()],
+    })
 
 # ---- MAIN
 if __name__ == '__main__':
