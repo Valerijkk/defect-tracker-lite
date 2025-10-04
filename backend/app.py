@@ -72,6 +72,7 @@ class Defect(db.Model):
 
 # ---- DB helpers / init
 def ensure_sqlite_column(table: str, column: str, ddl_type: str):
+    """Мягкая миграция: добавляет колонку, если её ещё нет (sqlite)."""
     cur = db.session.execute(text(f'PRAGMA table_info("{table}")'))
     cols = [row[1] for row in cur]
     if column not in cols:
@@ -84,14 +85,19 @@ with app.app_context():
     ensure_sqlite_column('defect', 'attachment_url', 'VARCHAR(255)')
 
 def seed_initial():
+    """Идемпотентные сиды для демо-данных."""
     if not User.query.filter_by(email='admin@example.com').first():
         db.session.add(User(email='admin@example.com',
                             password_hash=generate_password_hash('admin123'),
                             role='manager'))
     if not User.query.filter_by(email='eng@example.com').first():
-        db.session.add(User(email='eng@example.com',
-                            password_hash=generate_password_hash('eng123'),
-                            role='engineer'))
+        db.session.add(User(email='eng@example.com'),
+                       )
+        u = User(email='eng@example.com',
+                 password_hash=generate_password_hash('eng123'),
+                 role='engineer')
+        db.session.add(u)
+
     if Project.query.count() == 0:
         p1 = Project(name='Корпус А', description='Объект строительства А')
         p2 = Project(name='Корпус Б', description='Объект строительства Б')
@@ -113,8 +119,9 @@ with app.app_context():
 
 # ---- Auth helpers
 def create_token(user: User) -> str:
+    """JWT с sub-строкой (совместимо с PyJWT проверками)."""
     payload = {
-        'sub': str(user.id),  # ВАЖНО: sub строго строкой
+        'sub': str(user.id),  # sub строго строкой
         'role': user.role,
         'exp': datetime.now(tz=timezone.utc) + timedelta(days=JWT_EXPIRES_DAYS)
     }
@@ -129,13 +136,14 @@ def auth_required(manager_only=False):
             if not hdr.startswith('Bearer '):
                 return jsonify({'error': 'unauthorized'}), 401
             token = hdr.split(' ', 1)[1].strip()
+            # защита от случайных b'...' в строке
             if token.startswith("b'") and token.endswith("'"):
                 token = token[2:-1]
             try:
                 payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
             except Exception as e:
                 return jsonify({'error': 'invalid_token', 'detail': str(e)}), 401
-            request.user_id = payload.get('sub')  # строка — ок
+            request.user_id = payload.get('sub')
             request.user_role = payload.get('role')
             if manager_only and request.user_role != 'manager':
                 return jsonify({'error': 'forbidden'}), 403
@@ -147,7 +155,8 @@ def auth_required(manager_only=False):
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    return jsonify({'ok': True, 'ts': int(time.time())})
+    # Тесты ожидают поле "status": "ok"
+    return jsonify({'status': 'ok', 'ts': int(time.time())})
 
 ### Auth
 @app.route('/api/auth/login', methods=['POST'])
@@ -170,6 +179,7 @@ def register():
         return jsonify({'error': 'email_password_required'}), 400
     if User.query.filter_by(email=email).first():
         return jsonify({'error': 'email_exists'}), 409
+    # Через публичную форму всегда engineer
     if role not in ('engineer',):
         role = 'engineer'
     u = User(email=email, password_hash=generate_password_hash(password), role=role)
@@ -179,6 +189,7 @@ def register():
 # ---- Setup (dev bootstrap)
 @app.route('/api/setup/bootstrap', methods=['POST'])
 def setup_bootstrap():
+    """Создаёт admin@example.com/admin123 с ролью manager, если ещё нет."""
     admin = User.query.filter_by(email='admin@example.com').first()
     if admin:
         return jsonify({'ok': True, 'exists': True}), 200
@@ -244,6 +255,7 @@ def defects():
 
     items = q.order_by(Defect.id.desc()).all()
     projects_map = {p.id: p.name for p in Project.query.all()}
+
     def as_dict(d: Defect):
         return {
             'id': d.id, 'project_id': d.project_id, 'project_name': projects_map.get(d.project_id, ''),
@@ -251,6 +263,7 @@ def defects():
             'status': d.status, 'assignee_id': d.assignee_id, 'attachment_url': d.attachment_url,
             'created_at': (d.created_at or datetime.utcnow()).isoformat()
         }
+
     return jsonify([as_dict(d) for d in items])
 
 @app.route('/api/defects/<int:defect_id>', methods=['PATCH'])
@@ -284,19 +297,24 @@ def upload():
 def uploads(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
-# ---- Reports
+# ---- Reports (форма ответа приведена к ожиданиям тестов)
 @app.route('/api/reports/summary', methods=['GET'])
 @auth_required()
 def report_summary():
     all_def = Defect.query.all()
-    per_status = Counter([d.status for d in all_def])
-    per_priority = Counter([d.priority for d in all_def])
-    per_project = Counter([d.project_id for d in all_def])
+
+    per_status   = Counter(d.status for d in all_def)
+    per_priority = Counter(d.priority for d in all_def)
+    per_project  = Counter(d.project_id for d in all_def)
+
     projects = {p.id: p.name for p in Project.query.all()}
+
     return jsonify({
-        'status': per_status,
-        'priority': per_priority,
-        'project': {projects.get(pid, str(pid)): cnt for pid, cnt in per_project.items()}
+        'total': len(all_def),
+        'by_status':   [{'status': s, 'count': c}   for s, c in per_status.items()],
+        'by_priority': [{'priority': p, 'count': c} for p, c in per_priority.items()],
+        'by_project':  [{'project_id': pid, 'project': projects.get(pid, str(pid)), 'count': c}
+                        for pid, c in per_project.items()],
     })
 
 if __name__ == '__main__':
