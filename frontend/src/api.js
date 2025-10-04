@@ -1,11 +1,18 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: 'http://localhost:5000/api' });
+// Можно переопределить через REACT_APP_API_URL
+const api = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+  withCredentials: false,
+});
 
-// Подставляем токен, чтобы не прокидывать headers в каждом вызове
+// Перед каждым запросом кладём токен из localStorage
 api.interceptors.request.use((config) => {
   const t = localStorage.getItem('token');
-  if (t) config.headers.Authorization = 'Bearer ' + t;
+  if (t) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${t}`;
+  }
   return config;
 });
 
