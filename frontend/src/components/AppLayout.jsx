@@ -98,7 +98,6 @@ export default function AppLayout({
         </Container>
 
         <Box component="footer" sx={{ textAlign: 'center', py: 3, color: 'text.secondary' }}>
-          <Typography variant="caption">Made with MUI • Demo</Typography>
         </Box>
       </Box>
   );
