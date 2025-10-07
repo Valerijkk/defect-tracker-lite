@@ -2,17 +2,23 @@
 
 ```mermaid
 flowchart LR
-    engineer([Инженер]) --> ui[React SPA]
-    manager([Менеджер]) --> ui
-    ui --> api[Flask API (Defects)]
-    api --> db[(SQLite: app.db)]
+    engineer([Инженер])
+    manager([Менеджер])
+    ui[React SPA]
+    api[[Flask API\nDefects]]
+    db[(SQLite\napp.db)]
 
     subgraph Domains[Домены]
-        auth[[Users/Auth]]
+        auth[[Users / Auth]]
         projects[[Projects]]
         defects[[Defects]]
         reports[[Reports (calc)]]
     end
+
+    engineer --> ui
+    manager  --> ui
+    ui       --> api
+    api      --> db
 
     api --- auth
     api --- projects
@@ -25,16 +31,16 @@ flowchart LR
 ```mermaid
 flowchart TB
     subgraph Client[Клиент]
-        UI[React SPA / Router / Fetch]
+        UI[React SPA\nRouter\nFetch]
     end
 
     subgraph Server[Сервер: Flask]
         Controllers[Blueprints / Controllers]
-        Services[Business Logic: SLA, Status Flow]
-        Repos[Repositories (SQLAlchemy)]
+        Services[Business Logic:\nSLA, Status Flow]
+        Repos[Repositories\nSQLAlchemy]
     end
 
-    DB[(SQLite: app.db)]
+    DB[(SQLite\napp.db)]
 
     UI --> Controllers
     Controllers --> Services
