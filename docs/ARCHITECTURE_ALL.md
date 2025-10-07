@@ -5,20 +5,20 @@ flowchart LR
     engineer([Инженер])
     manager([Менеджер])
     ui[React SPA]
-    api[[Flask API\nDefects]]
-    db[(SQLite\napp.db)]
+    api[[Flask API / Defects]]
+    db[(SQLite / app.db)]
 
-    subgraph Domains[Домены]
+    subgraph Domains["Домены"]
         auth[[Users / Auth]]
         projects[[Projects]]
         defects[[Defects]]
-        reports[[Reports (calc)]]
+        reports[[Reports calc]]
     end
 
     engineer --> ui
-    manager  --> ui
-    ui       --> api
-    api      --> db
+    manager --> ui
+    ui --> api
+    api --> db
 
     api --- auth
     api --- projects
